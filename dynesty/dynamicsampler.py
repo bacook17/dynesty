@@ -1694,8 +1694,8 @@ class DynamicSampler(object):
                                logl_min=logl_bounds[0],
                                logl_max=logl_bounds[1])
 
-                # Check if surpassed maxcall_per_it
-                if nc > maxcall_per_it:
+                # Check if surpassed maxcall_per_it and NOT initializing
+                if (nc > maxcall_per_it) and (worst >= 0):
                     break
 
             # Combine batch with previous runs.
