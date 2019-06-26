@@ -44,15 +44,22 @@ Estimating the evidence and posterior is as simple as::
 
     import dynesty
 
-    # "Standard" nested sampling.
+    # "Static" nested sampling.
     sampler = dynesty.NestedSampler(loglike, ptform, ndim)
     sampler.run_nested()
-    results = sampler.results
+    sresults = sampler.results
 
     # "Dynamic" nested sampling.
     dsampler = dynesty.DynamicNestedSampler(loglike, ptform, ndim)
     dsampler.run_nested()
     dresults = dsampler.results
+
+Combining the results from multiple (independent) runs is easy::
+
+    from dynesty import utils as dyfunc
+
+    # Combine results from "Static" and "Dynamic" runs.
+    results = dyfunc.merge_runs([sresults, dresults])
 
 We can visualize our results using several of the built-in plotting utilities.
 For instance::
@@ -67,3 +74,24 @@ For instance::
 
     # Plot the 2-D marginalized posteriors.
     cfig, caxes = dyplot.cornerplot(results)
+
+We can post-process these results using some built-in utilities.
+For instance::
+
+    from dynesty import utils as dyfunc
+
+    # Extract sampling results.
+    samples = results.samples  # samples
+    weights = np.exp(results.logwt - results.logz[-1])  # normalized weights
+
+    # Compute 5%-95% quantiles.
+    quantiles = dyfunc.quantile(samples, [0.05, 0.95], weights=weights)
+
+    # Compute weighted mean and covariance.
+    mean, cov = dyfunc.mean_and_cov(samples, weights)
+
+    # Resample weighted samples.
+    samples_equal = dyfunc.resample_equal(samples, weights)
+
+    # Generate a new set of results with statistical+sampling uncertainties.
+    results_sim = dyfunc.simulate_run(results)

@@ -21,7 +21,7 @@ from scipy import spatial
 from scipy.ndimage import gaussian_filter as norm_kde
 from scipy.stats import gaussian_kde
 import warnings
-from .utils import resample_equal
+from .utils import resample_equal, unitcheck
 from .utils import quantile as _quantile
 
 try:
@@ -206,7 +206,7 @@ def runplot(results, span=None, logplot=False, kde=True, nkde=1000,
     # Setting up default plot layout.
     if fig is None:
         fig, axes = pl.subplots(4, 1, figsize=(16, 16))
-        xspan = [(0., -min(logvol)) for ax in axes]
+        xspan = [(0., -min(logvol)) for _ax in axes]
         yspan = span
     else:
         fig, axes = fig
@@ -224,12 +224,25 @@ def runplot(results, span=None, logplot=False, kde=True, nkde=1000,
         yspan = [t if t != (0., 1.) else (None, None) for t in yspan]
 
     # Set up bounds for plotting.
-    [axes[i].set_xlim([min(0., xspan[i][0]),
-                       max(-min(logvol), xspan[i][1])])
-     for i in range(4)]
-    [axes[i].set_ylim([min(span[i][0], yspan[i][0]),
-                       max(span[i][1], yspan[i][1])])
-     for i in range(4)]
+    for i in range(4):
+        if xspan[i][0] is None:
+            xmin = None
+        else:
+            xmin = min(0., xspan[i][0])
+        if xspan[i][1] is None:
+            xmax = -min(logvol)
+        else:
+            xmax = max(-min(logvol), xspan[i][1])
+        if yspan[i][0] is None:
+            ymin = None
+        else:
+            ymin = min(span[i][0], yspan[i][0])
+        if yspan[i][1] is None:
+            ymax = span[i][1]
+        else:
+            ymax = max(span[i][1], yspan[i][1])
+        axes[i].set_xlim([xmin, xmax])
+        axes[i].set_ylim([ymin, ymax])
 
     # Plotting.
     labels = ['Live Points', 'Likelihood\n(normalized)',
@@ -263,7 +276,7 @@ def runplot(results, span=None, logplot=False, kde=True, nkde=1000,
         # Plot run.
         if logplot and i == 3:
             ax.semilogy(-logvol, d, color=c, **plot_kwargs)
-            yspan = [ax.get_ylim() for ax in axes]
+            yspan = [ax.get_ylim() for _ax in axes]
         elif kde and i == 2:
             ax.plot(-logvol_new, d, color=c, **plot_kwargs)
         else:
@@ -286,7 +299,7 @@ def runplot(results, span=None, logplot=False, kde=True, nkde=1000,
     return fig, axes
 
 
-def traceplot(results, span=None, quantiles=[0.16, 0.5, 0.84], smooth=0.02,
+def traceplot(results, span=None, quantiles=[0.025, 0.5, 0.975], smooth=0.02,
               post_color='blue', post_kwargs=None, kde=True, nkde=1000,
               trace_cmap='plasma', trace_color=None, trace_kwargs=None,
               connect=False, connect_highlight=10, connect_color='red',
@@ -318,8 +331,8 @@ def traceplot(results, span=None, quantiles=[0.16, 0.5, 0.84], smooth=0.02,
 
     quantiles : iterable, optional
         A list of fractional quantiles to overplot on the 1-D marginalized
-        posteriors as vertical dashed lines. Default is `[0.16, 0.5, 0.84]`
-        (the 68%/1-sigma credible interval).
+        posteriors as vertical dashed lines. Default is `[0.025, 0.5, 0.975]`
+        (the 95%/2-sigma credible interval).
 
     smooth : float or iterable with shape (ndim,), optional
         The standard deviation (either a single value or a different value for
@@ -399,7 +412,7 @@ def traceplot(results, span=None, quantiles=[0.16, 0.5, 0.84], smooth=0.02,
     show_titles : bool, optional
         Whether to display a title above each 1-D marginalized posterior
         showing the 0.5 quantile along with the upper/lower bounds associated
-        with the 0.16 and 0.84 (68%/1-sigma credible interval) quantiles.
+        with the 0.025 and 0.975 (95%/2-sigma credible interval) quantiles.
         Default is `True`.
 
     title_fmt : str, optional
@@ -663,7 +676,7 @@ def traceplot(results, span=None, quantiles=[0.16, 0.5, 0.84], smooth=0.02,
         if show_titles:
             title = None
             if title_fmt is not None:
-                ql, qm, qh = _quantile(x, [0.16, 0.5, 0.84], weights=weights)
+                ql, qm, qh = _quantile(x, [0.025, 0.5, 0.975], weights=weights)
                 q_minus, q_plus = qm - ql, qh - qm
                 fmt = "{{0:{0}}}".format(title_fmt).format
                 title = r"${{{0}}}_{{-{1}}}^{{+{2}}}$"
@@ -860,7 +873,10 @@ def cornerpoints(results, thin=1, span=None, cmap='plasma', color=None,
     # Plot the 2-D projected samples.
     for i, x in enumerate(samples[1:]):
         for j, y in enumerate(samples[:-1]):
-            ax = axes[i, j]
+            try:
+                ax = axes[i, j]
+            except:
+                ax = axes
             # Setup axes.
             if span is not None:
                 ax.set_xlim(span[j])
@@ -922,9 +938,9 @@ def cornerpoints(results, thin=1, span=None, cmap='plasma', color=None,
     return (fig, axes)
 
 
-def cornerplot(results, span=None, quantiles=[0.16, 0.5, 0.84],
-               color='black', smooth=0.02, density_smooth=None,
-               hist_kwargs=None,
+def cornerplot(results, span=None, quantiles=[0.025, 0.5, 0.975],
+               color='black', smooth=0.02, hist_kwargs=None,
+               density_smooth=None,
                hist2d_kwargs=None, labels=None, label_kwargs=None,
                show_titles=False, title_fmt=".2f", title_kwargs=None,
                truths=None, truth_color='red', truth_kwargs=None,
@@ -952,8 +968,8 @@ def cornerplot(results, span=None, quantiles=[0.16, 0.5, 0.84],
 
     quantiles : iterable, optional
         A list of fractional quantiles to overplot on the 1-D marginalized
-        posteriors as vertical dashed lines. Default is `[0.16, 0.5, 0.84]`
-        (spanning the 68%/1-sigma credible interval).
+        posteriors as vertical dashed lines. Default is `[0.025, 0.5, 0.975]`
+        (spanning the 95%/2-sigma credible interval).
 
     color : str or iterable with shape (ndim,), optional
         A `~matplotlib`-style color (either a single color or a different
@@ -990,7 +1006,7 @@ def cornerplot(results, span=None, quantiles=[0.16, 0.5, 0.84],
     show_titles : bool, optional
         Whether to display a title above each 1-D marginalized posterior
         showing the 0.5 quantile along with the upper/lower bounds associated
-        with the 0.16 and 0.84 (68%/1-sigma credible interval) quantiles.
+        with the 0.025 and 0.975 (95%/2-sigma credible interval) quantiles.
         Default is `True`.
 
     title_fmt : str, optional
@@ -1209,7 +1225,7 @@ def cornerplot(results, span=None, quantiles=[0.16, 0.5, 0.84],
         if show_titles:
             title = None
             if title_fmt is not None:
-                ql, qm, qh = _quantile(x, [0.16, 0.5, 0.84], weights=weights)
+                ql, qm, qh = _quantile(x, [0.025, 0.5, 0.975], weights=weights)
                 q_minus, q_plus = qm - ql, qh - qm
                 fmt = "{{0:{0}}}".format(title_fmt).format
                 title = r"${{{0}}}_{{-{1}}}^{{+{2}}}$"
@@ -1298,10 +1314,10 @@ def cornerplot(results, span=None, quantiles=[0.16, 0.5, 0.84],
 
 
 def boundplot(results, dims, it=None, idx=None, prior_transform=None,
-              ndraws=5000, color='gray', plot_kwargs=None, labels=None,
-              label_kwargs=None, max_n_ticks=5, use_math_text=False,
-              show_live=False, live_color='darkviolet', live_kwargs=None,
-              span=None, fig=None):
+              periodic=None, ndraws=5000, color='gray', plot_kwargs=None,
+              labels=None, label_kwargs=None, max_n_ticks=5,
+              use_math_text=False, show_live=False, live_color='darkviolet',
+              live_kwargs=None, span=None, fig=None):
     """
     Return the bounding distribution used to propose either (1) live points
     at a given iteration or (2) a specific dead point during
@@ -1331,6 +1347,14 @@ def boundplot(results, dims, it=None, idx=None, prior_transform=None,
         The function transforming samples within the unit cube back to samples
         in the native model space. If provided, the transformed bounding
         distribution will be plotted in the native model space.
+
+    periodic : iterable, optional
+        A list of indices for parameters with periodic boundary conditions.
+        These parameters *will not* have their positions constrained to be
+        within the unit cube, enabling smooth behavior for parameters
+        that may wrap around the edge. It is assumed that their periodicity
+        is dealt with in the `prior_transform`.
+        Default is `None` (i.e. no periodic boundary conditions).
 
     ndraws : int, optional
         The number of random samples to draw from the bounding distribution
@@ -1413,8 +1437,14 @@ def boundplot(results, dims, it=None, idx=None, prior_transform=None,
         bounds = results['bound']
     except:
         raise ValueError("No bounds were saved in the results!")
-    nbound = len(bounds)
     nsamps = len(results['samples'])
+
+    # Gather non-periodic boundary conditions.
+    if periodic is not None:
+        nonperiodic = np.ones(bounds[0].n, dtype='bool')
+        nonperiodic[periodic] = False
+    else:
+        nonperiodic = None
 
     if it is not None:
         if it >= nsamps:
@@ -1546,9 +1576,8 @@ def boundplot(results, dims, it=None, idx=None, prior_transform=None,
         if show_live:
             l1, l2 = live_u[:, dims].T
     else:
-        # Remove points outside of the unit cube.
-        sel = [np.all(point > 0.) and np.all(point < 1.)
-               for point in psamps]
+        # Remove points outside of the unit cube as appropriate.
+        sel = [unitcheck(point, nonperiodic) for point in psamps]
         vsamps = np.array(list(map(prior_transform, psamps[sel])))
         x1, x2 = vsamps[:, dims].T
         if show_live:
@@ -1587,7 +1616,7 @@ def boundplot(results, dims, it=None, idx=None, prior_transform=None,
     axes.yaxis.set_major_formatter(sf)
     if labels is not None:
         axes.set_xlabel(labels[0], **label_kwargs)
-        axes.set_ylabel(label[1], **label_kwargs)
+        axes.set_ylabel(labels[1], **label_kwargs)
     else:
         axes.set_xlabel(r"$x_{"+str(dims[0]+1)+"}$", **label_kwargs)
         axes.set_ylabel(r"$x_{"+str(dims[1]+1)+"}$", **label_kwargs)
@@ -1596,10 +1625,10 @@ def boundplot(results, dims, it=None, idx=None, prior_transform=None,
 
 
 def cornerbound(results, it=None, idx=None, prior_transform=None,
-                ndraws=5000, color='gray', plot_kwargs=None, labels=None,
-                label_kwargs=None, max_n_ticks=5, use_math_text=False,
-                show_live=False, live_color='darkviolet', live_kwargs=None,
-                span=None, fig=None):
+                periodic=None, ndraws=5000, color='gray', plot_kwargs=None,
+                labels=None, label_kwargs=None, max_n_ticks=5,
+                use_math_text=False, show_live=False, live_color='darkviolet',
+                live_kwargs=None, span=None, fig=None):
     """
     Return the bounding distribution used to propose either (1) live points
     at a given iteration or (2) a specific dead point during
@@ -1625,6 +1654,14 @@ def cornerbound(results, it=None, idx=None, prior_transform=None,
         The function transforming samples within the unit cube back to samples
         in the native model space. If provided, the transformed bounding
         distribution will be plotted in the native model space.
+
+    periodic : iterable, optional
+        A list of indices for parameters with periodic boundary conditions.
+        These parameters *will not* have their positions constrained to be
+        within the unit cube, enabling smooth behavior for parameters
+        that may wrap around the edge. It is assumed that their periodicity
+        is dealt with in the `prior_transform`.
+        Default is `None` (i.e. no periodic boundary conditions).
 
     ndraws : int, optional
         The number of random samples to draw from the bounding distribution
@@ -1708,8 +1745,14 @@ def cornerbound(results, it=None, idx=None, prior_transform=None,
         bounds = results['bound']
     except:
         raise ValueError("No bounds were saved in the results!")
-    nbound = len(bounds)
     nsamps = len(results['samples'])
+
+    # Gather non-periodic boundary conditions.
+    if periodic is not None:
+        nonperiodic = np.ones(bounds[0].n, dtype='bool')
+        nonperiodic[periodic] = False
+    else:
+        nonperiodic = None
 
     if it is not None:
         if it >= nsamps:
@@ -1841,8 +1884,7 @@ def cornerbound(results, it=None, idx=None, prior_transform=None,
             lsamps = live_u.T
     else:
         # Remove points outside of the unit cube.
-        sel = [np.all(point > 0.) and np.all(point < 1.)
-               for point in psamps]
+        sel = [unitcheck(point, nonperiodic) for point in psamps]
         psamps = np.array(list(map(prior_transform, psamps[sel])))
         psamps = psamps.T
         if show_live:
@@ -1881,7 +1923,10 @@ def cornerbound(results, it=None, idx=None, prior_transform=None,
     # Plot the 2-D projected samples.
     for i, x in enumerate(psamps[1:]):
         for j, y in enumerate(psamps[:-1]):
-            ax = axes[i, j]
+            try:
+                ax = axes[i, j]
+            except:
+                ax = axes
             # Setup axes.
             if span is not None:
                 ax.set_xlim(span[j])

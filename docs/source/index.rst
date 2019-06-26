@@ -2,19 +2,27 @@
 dynesty
 =======
 
+.. image:: ../images/title.gif
+    :align: center
+
 ``dynesty`` is a Pure Python, MIT-licensed `Dynamic Nested Sampling
 <https://arxiv.org/abs/1704.03459>`_ package for estimating Bayesian posteriors
 and evidences. See :ref:`Crash Course` and :ref:`Getting Started`
 for more information. The latest development version can be found `here
 <http://github.com/joshspeagle/dynesty>`_.
 
+**The release paper describing the code can be found**
+`here <https://github.com/joshspeagle/dynesty/tree/master/paper/dynesty.pdf>`_.
+
 Installation
 ============
 
 ``dynesty`` is compatible with both Python 2.7 and Python 3.6. It requires
-``numpy``, ``scipy``, ``matplotlib``, and ``six``; ``sklearn`` is also
-recommended but not required. Installing the most recent stable version
-of the package is as easy as::
+``numpy`` (for arithmetic), 
+``scipy`` (for special functions), 
+``matplotlib`` (for plotting), and 
+``six`` (to enforce Python 2/3 compliance). 
+Installing the most recent stable version of the package is as easy as::
 
     pip install dynesty
 
@@ -25,6 +33,62 @@ be installed directly from a local copy of the repository by running::
 
 Changelog
 =========
+
+.. image:: ../images/logo.gif
+    :align: center
+
+0.9.7 (2019-06-13)
+-------------------
+* Ensemble bounds can now adapt to elongated distributions (with
+  `Johannes Buchner <https://github.com/JohannesBuchner>`_).
+
+* Random walks now behave differently near boundaries (with
+  `Gregory Ashton <https://github.com/GregoryAshton>`_).
+
+* Pickling sampler states should now work better in Python 3 (with
+  `Dustin Lang <https://github.com/dstndstnr>`_.
+
+* Doubled output errors in default approximation in line with theoretical
+  expectations.
+
+* Small bugfixes and docfixes (with
+  `Patricio Cubillos <https://github.com/dstndstnr>`_).
+
+
+0.9.5.3 (2019-03-29)
+-------------------
+* Various small bugfixes, with contributions by
+  `Gregory Ashton <https://github.com/GregoryAshton>`_ and
+  `Johannes Buchner <https://github.com/JohannesBuchner>`_.
+
+0.9.5 (2019-03-14)
+-------------------
+* Added support for periodic boundary conditions.
+
+* Set up basic tests for continuous integration.
+
+0.9.4 (2019-03-07)
+-------------------
+* Added a logo!
+
+* Updated and reorganized documentation and demos.
+
+* Added proper support for gradients.
+
+* Changed defaults and added several "quality of life" improvements.
+
+0.9.3 (2019-02-10)
+-------------------
+* Updated documentation.
+
+* Modified re-scaling behavior to better deal with inefficient proposals.
+
+* Improved stability of the current ellipsoid decomposition algorithm.
+
+* Added new `'auto'` options and changed a number of defaults to make things
+  easier for general users.
+
+* Plotting now defaults to 95% credible intervals instead of 68%.
 
 0.9.2 (2018-03-17)
 ------------------
