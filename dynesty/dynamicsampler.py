@@ -636,7 +636,8 @@ class DynamicSampler(object):
     def sample_initial(self, nlive=500, update_interval=None,
                        first_update=None, maxiter=None, maxcall=None,
                        maxcall_per_iter=None, save_bounds=True,
-                       logl_max=np.inf, dlogz=0.01, live_points=None):
+                       logl_max=np.inf, dlogz=0.01, live_points=None,
+                       reset_on_start=True):
         """
         Generate a series of initial samples from a nested sampling
         run using a fixed number of live points using an internal
@@ -768,7 +769,8 @@ class DynamicSampler(object):
             warnings.warn("Beware: `nlive_init <= 2 * ndim`!")
 
         # Reset saved results to avoid any possible conflicts.
-        self.reset()
+        if reset_on_start:
+            self.reset()
 
         # Initialize the first set of live points.
         if live_points is None:
@@ -1452,7 +1454,7 @@ class DynamicSampler(object):
                    maxiter=None, maxcall=None, maxbatch=None,
                    maxcall_per_iter=None, stop_function=None, stop_kwargs=None,
                    use_stop=True, save_bounds=True, print_progress=True,
-                   print_func=None, live_points=None):
+                   print_func=None, live_points=None, reset_on_start=True):
         """
         **The main dynamic nested sampling loop.** After an initial "baseline"
         run using a constant number of live points, dynamically allocates
@@ -1618,7 +1620,8 @@ class DynamicSampler(object):
                                                maxcall_per_iter=maxcall_per_iter,
                                                save_bounds=save_bounds,
                                                logl_max=logl_max_init,
-                                               live_points=live_points):
+                                               live_points=live_points,
+                                               reset_on_start=reset_on_start):
                 (worst, ustar, vstar, loglstar, logvol,
                  logwt, logz, logzvar, h, nc, worst_it,
                  boundidx, bounditer, eff, delta_logz) = results
