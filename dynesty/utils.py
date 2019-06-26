@@ -12,38 +12,37 @@ from six.moves import range
 import sys
 import warnings
 import math
-import scipy.misc as misc
+try:
+    from scipy.special import logsumexp
+except ImportError:
+    from scipy.misc import logsumexp
 import numpy as np
 import copy
 
-from .results import *
+from .results import Results
 
-__all__ = ["random_choice", "resample_equal", "mean_and_cov", "quantile",
+__all__ = ["unitcheck", "resample_equal", "mean_and_cov", "quantile",
            "jitter_run", "resample_run", "simulate_run", "reweight_run",
            "unravel_run", "merge_runs", "kl_divergence", "kld_error",
-           "_merge_two"]
+           "_merge_two", "_get_nsamps_samples_n"]
 
 SQRTEPS = math.sqrt(float(np.finfo(np.float64).eps))
 
 
-def random_choice(a, p, rstate=None):
-    """Built-in replacement for `~numpy.random.choice`."""
+def unitcheck(u, nonperiodic=None):
+    """Check whether `u` is inside the unit cube. Given a masked array
+    `nonperiodic`, also allows periodic boundaries conditions to exceed
+    the unit cube."""
 
-    if rstate is None:
-        rstate = np.random
-
-    if abs(np.sum(p) - 1.) > SQRTEPS:  # same tol as in np.random.choice.
-        raise ValueError("probabilities do not sum to 1")
-
-    # Randomly sample an index.
-    r = rstate.rand()
-    i = 0
-    t = p[i]
-    while t < r:
-        i += 1
-        t += p[i]
-
-    return i
+    if nonperiodic is None:
+        # No periodic boundary conditions provided.
+        return np.all(u > 0.) and np.all(u < 1.)
+    else:
+        # Alternating periodic and non-periodic boundary conditions.
+        return (np.all(u[nonperiodic] > 0.) and
+                np.all(u[nonperiodic] < 1.) and
+                np.all(u[~nonperiodic] > -0.5) and
+                np.all(u[~nonperiodic] < 1.5))
 
 
 def mean_and_cov(samples, weights):
@@ -198,6 +197,43 @@ def quantile(x, q, weights=None):
         return quantiles
 
 
+def _get_nsamps_samples_n(res):
+    """ Helper function for calculating the number of samples
+
+    Parameters
+    ----------
+    res : :class:`~dynesty.results.Results` instance
+        The :class:`~dynesty.results.Results` instance taken from a previous
+        nested sampling run.
+
+    Returns
+    -------
+    nsamps: int
+        The total number of samples
+    samples_n: array
+        Number of live points at a given iteration
+
+    """
+    try:
+        # Check if the number of live points explicitly changes.
+        samples_n = res.samples_n
+        nsamps = len(samples_n)
+    except:
+        # If the number of live points is constant, compute `samples_n`.
+        niter = res.niter
+        nlive = res.nlive
+        nsamps = len(res.logvol)
+        if nsamps == niter:
+            samples_n = np.ones(niter, dtype='int') * nlive
+        elif nsamps == (niter + nlive):
+            samples_n = np.append(np.ones(niter, dtype='int') * nlive,
+                                  np.arange(1, nlive + 1)[::-1])
+        else:
+            raise ValueError("Final number of samples differs from number of "
+                             "iterations and number of live points.")
+    return nsamps, samples_n
+
+
 def jitter_run(res, rstate=None, approx=False):
     """
     Probes **statistical uncertainties** on a nested sampling run by
@@ -230,24 +266,8 @@ def jitter_run(res, rstate=None, approx=False):
         rstate = np.random
 
     # Initialize evolution of live points over the course of the run.
+    nsamps, samples_n = _get_nsamps_samples_n(res)
     logl = res.logl
-    try:
-        # Check if the number of live points explicitly changes.
-        samples_n = res.samples_n
-        nsamps = len(samples_n)
-    except:
-        # If the number of live points is constant, compute `samples_n`.
-        niter = res.niter
-        nlive = res.nlive
-        nsamps = len(res.logvol)
-        if nsamps == niter:
-            samples_n = np.ones(niter, dtype='int') * nlive
-        elif nsamps == (niter + nlive):
-            samples_n = np.append(np.ones(niter, dtype='int') * nlive,
-                                  np.arange(1, nlive + 1)[::-1])
-        else:
-            raise ValueError("Final number of samples differs from number of "
-                             "iterations and number of live points.")
 
     # Simulate the prior volume shrinkage associated with our set of "dead"
     # points. At each iteration, if the number of live points is constant or
@@ -317,9 +337,8 @@ def jitter_run(res, rstate=None, approx=False):
     loglstar = -1.e300
     logzvar = 0.
     logvols_pad = np.concatenate(([0.], logvol))
-    logdvols = misc.logsumexp(a=np.c_[logvols_pad[:-1], logvols_pad[1:]],
-                              axis=1, b=np.c_[np.ones(nsamps),
-                                              -np.ones(nsamps)])
+    logdvols = logsumexp(a=np.c_[logvols_pad[:-1], logvols_pad[1:]],
+                         axis=1, b=np.c_[np.ones(nsamps), -np.ones(nsamps)])
     logdvols += math.log(0.5)
     dlvs = -np.diff(np.append(0., res.logvol))
     saved_logwt, saved_logz, saved_logzvar, saved_h = [], [], [], []
@@ -350,7 +369,9 @@ def jitter_run(res, rstate=None, approx=False):
     new_res.logvol = np.array(logvol)
     new_res.logwt = np.array(saved_logwt)
     new_res.logz = np.array(saved_logz)
-    new_res.logzerr = np.sqrt(np.array(saved_logzvar))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        new_res.logzerr = np.sqrt(np.array(saved_logzvar))
     new_res.h = np.array(saved_h)
 
     return new_res
@@ -398,7 +419,6 @@ def resample_run(res, rstate=None, return_idx=False):
         # Check if the number of live points explicitly changes.
         samples_n = res.samples_n
         samples_batch = res.samples_batch
-        batch_nlive = res.batch_nlive
         batch_bounds = res.batch_bounds
         added_final_live = True
     except:
@@ -422,7 +442,6 @@ def resample_run(res, rstate=None, return_idx=False):
 
     # Identify unique particles that make up each strand.
     ids = np.unique(res.samples_id)
-    nunique = len(ids)
 
     # Split the set of strands into two groups: a "baseline" group that
     # contains points initially sampled from the prior, which gives information
@@ -502,9 +521,8 @@ def resample_run(res, rstate=None, return_idx=False):
     loglstar = -1.e300
     logzvar = 0.
     logvols_pad = np.concatenate(([0.], logvol))
-    logdvols = misc.logsumexp(a=np.c_[logvols_pad[:-1], logvols_pad[1:]],
-                              axis=1, b=np.c_[np.ones(nsamps),
-                                              -np.ones(nsamps)])
+    logdvols = logsumexp(a=np.c_[logvols_pad[:-1], logvols_pad[1:]],
+                         axis=1, b=np.c_[np.ones(nsamps), -np.ones(nsamps)])
     logdvols += math.log(0.5)
     dlvs = logvols_pad[:-1] - logvols_pad[1:]
     saved_logwt, saved_logz, saved_logzvar, saved_h = [], [], [], []
@@ -547,7 +565,9 @@ def resample_run(res, rstate=None, return_idx=False):
     new_res.logl = logl
     new_res.logvol = logvol
     new_res.logz = np.array(saved_logz)
-    new_res.logzerr = np.sqrt(np.array(saved_logzvar))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        new_res.logzerr = np.sqrt(np.array(saved_logzvar))
     new_res.h = np.array(saved_h)
 
     if return_idx:
@@ -641,9 +661,8 @@ def reweight_run(res, logp_new, logp_old=None):
     loglstar = -1.e300
     logzvar = 0.
     logvols_pad = np.concatenate(([0.], logvol))
-    logdvols = misc.logsumexp(a=np.c_[logvols_pad[:-1], logvols_pad[1:]],
-                              axis=1, b=np.c_[np.ones(nsamps),
-                                              -np.ones(nsamps)])
+    logdvols = logsumexp(a=np.c_[logvols_pad[:-1], logvols_pad[1:]],
+                         axis=1, b=np.c_[np.ones(nsamps), -np.ones(nsamps)])
     logdvols += math.log(0.5)
     dlvs = -np.diff(np.append(0., logvol))
     saved_logwt, saved_logz, saved_logzvar, saved_h = [], [], [], []
@@ -754,9 +773,8 @@ def unravel_run(res, save_proposals=True, print_progress=True):
         loglstar = -1.e300
         logzvar = 0.
         logvols_pad = np.concatenate(([0.], logvol))
-        logdvols = misc.logsumexp(a=np.c_[logvols_pad[:-1], logvols_pad[1:]],
-                                  axis=1, b=np.c_[np.ones(nsamps),
-                                                  -np.ones(nsamps)])
+        logdvols = logsumexp(a=np.c_[logvols_pad[:-1], logvols_pad[1:]],
+                             axis=1, b=np.c_[np.ones(nsamps), -np.ones(nsamps)])
         logdvols += math.log(0.5)
         dlvs = logvols_pad[:-1] - logvols_pad[1:]
         saved_logwt, saved_logz, saved_logzvar, saved_h = [], [], [], []
@@ -909,9 +927,9 @@ def merge_runs(res_list, print_progress=True):
         if print_progress:
             sys.stderr.write('\rMerge: {0}/{1}     '.format(counter, ntot))
 
-    samples_n = res.samples_n
-    niter = res.niter
+    nsamps, samples_n = _get_nsamps_samples_n(res)
     nlive = max(samples_n)
+    niter = res.niter
     standard_run = False
 
     # Check if we have a constant number of live points.
@@ -1075,11 +1093,6 @@ def kld_error(res, error='simulate', rstate=None, return_new=False,
 
     # Define our new importance weights.
     logp1 = new_res.logwt - new_res.logz[-1]
-
-    # Define the positions where the discrete probability distributions exists.
-    samples1, samples2 = new_res.samples, res.samples
-    samples1_id, samples2_id = new_res.samples_id, res.samples_id
-    nsamps1, nsamps2 = len(samples1), len(samples2)
 
     # Compute the KL divergence.
     kld = np.cumsum(np.exp(logp1) * (logp1 - logp2))
@@ -1339,9 +1352,8 @@ def _merge_two(res1, res2, compute_aux=False):
         loglstar = -1.e300
         logzvar = 0.
         logvols_pad = np.concatenate(([0.], combined_logvol))
-        logdvols = misc.logsumexp(a=np.c_[logvols_pad[:-1], logvols_pad[1:]],
-                                  axis=1, b=np.c_[np.ones(ntot),
-                                                  -np.ones(ntot)])
+        logdvols = logsumexp(a=np.c_[logvols_pad[:-1], logvols_pad[1:]],
+                             axis=1, b=np.c_[np.ones(ntot), -np.ones(ntot)])
         logdvols += math.log(0.5)
         dlvs = logvols_pad[:-1] - logvols_pad[1:]
         for i in range(ntot):

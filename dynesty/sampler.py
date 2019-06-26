@@ -15,15 +15,15 @@ import warnings
 import math
 import copy
 import numpy as np
-
-from .results import *
-from .bounding import *
-from .sampling import *
-
 try:
     from scipy.special import logsumexp
 except ImportError:
     from scipy.misc import logsumexp
+
+
+from .results import Results, print_fn
+from .bounding import UnitCube
+from .sampling import sample_unif
 
 __all__ = ["Sampler"]
 
@@ -148,6 +148,11 @@ class Sampler(object):
         self.saved_bounditer = []  # active bound at a specific iteration
         self.saved_scale = []  # scale factor at each iteration
 
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        del state['rstate']
+        return state
+
     def reset(self):
         """Re-initialize the sampler."""
 
@@ -209,20 +214,22 @@ class Sampler(object):
 
         # Add all saved samples to the results.
         if self.save_samples:
-            results = [('nlive', self.nlive),
-                       ('niter', self.it - 1),
-                       ('ncall', np.array(self.saved_nc)),
-                       ('eff', self.eff),
-                       ('samples', np.array(self.saved_v)),
-                       ('samples_id', np.array(self.saved_id)),
-                       ('samples_it', np.array(self.saved_it)),
-                       ('samples_u', np.array(self.saved_u)),
-                       ('logwt', np.array(self.saved_logwt)),
-                       ('logl', np.array(self.saved_logl)),
-                       ('logvol', np.array(self.saved_logvol)),
-                       ('logz', np.array(self.saved_logz)),
-                       ('logzerr', np.sqrt(np.array(self.saved_logzvar))),
-                       ('information', np.array(self.saved_h))]
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                results = [('nlive', self.nlive),
+                           ('niter', self.it - 1),
+                           ('ncall', np.array(self.saved_nc)),
+                           ('eff', self.eff),
+                           ('samples', np.array(self.saved_v)),
+                           ('samples_id', np.array(self.saved_id)),
+                           ('samples_it', np.array(self.saved_it)),
+                           ('samples_u', np.array(self.saved_u)),
+                           ('logwt', np.array(self.saved_logwt)),
+                           ('logl', np.array(self.saved_logl)),
+                           ('logvol', np.array(self.saved_logvol)),
+                           ('logz', np.array(self.saved_logz)),
+                           ('logzerr', np.sqrt(np.array(self.saved_logzvar))),
+                           ('information', np.array(self.saved_h))]
         else:
             raise ValueError("You didn't save any samples!")
 
@@ -236,11 +243,6 @@ class Sampler(object):
             results.append(('scale', np.array(self.saved_scale)))
 
         return Results(results)
-
-    def _check_unit_cube(self, point):
-        """Check whether a point falls within the unit cube."""
-
-        return np.all(point > 0.) and np.all(point < 1.)
 
     def _beyond_unit_bound(self, loglstar):
         """Check whether we should update our bound beyond the initial
@@ -267,7 +269,7 @@ class Sampler(object):
         while True:
             try:
                 # Remove unused points from the queue.
-                f = self.queue.pop()
+                self.queue.pop()
                 self.unused += 1  # add to the total number of unused points
                 self.nqueue -= 1
             except:
@@ -429,7 +431,7 @@ class Sampler(object):
             dh = h_new - h
             h = h_new
             logz = logz_new
-            logzvar += dh * dlv  # var[ln(evidence)] estimate
+            logzvar += 2. * dh * dlv  # var[ln(evidence)] estimate
             loglstar = loglstar_new
             logz_remain = loglmax + logvol  # remaining ln(evidence)
             delta_logz = np.logaddexp(logz, logz_remain) - logz  # dlogz
@@ -737,7 +739,7 @@ class Sampler(object):
             dh = h_new - h
             h = h_new
             logz = logz_new
-            logzvar += dh * self.dlv
+            logzvar += 2. * dh * self.dlv
             loglstar = loglstar_new
 
             # Compute bound index at the current iteration.
@@ -866,10 +868,6 @@ class Sampler(object):
             ncall += nc
             if delta_logz > 1e6:
                 delta_logz = np.inf
-            if logzvar >= 0. and logzvar <= 1e6:
-                logzerr = np.sqrt(logzvar)
-            else:
-                logzerr = np.nan
             if logz <= -1e6:
                 logz = -np.inf
 
@@ -887,10 +885,6 @@ class Sampler(object):
                  eff, delta_logz) = results
                 if delta_logz > 1e6:
                     delta_logz = np.inf
-                if logzvar >= 0. and logzvar <= 1e6:
-                    logzerr = np.sqrt(logzvar)
-                else:
-                    logzerr = np.nan
                 if logz <= -1e6:
                     logz = -np.inf
 
@@ -898,3 +892,41 @@ class Sampler(object):
                 if print_progress:
                     print_func(results, it, ncall, add_live_it=i+1,
                                dlogz=dlogz, logl_max=logl_max)
+
+    def add_final_live(self, print_progress=True, print_func=None):
+        """
+        **A wrapper that executes the loop adding the final live points.**
+        Adds the final set of live points to the pre-existing sequence of
+        dead points from the current nested sampling run.
+
+        Parameters
+        ----------
+        print_progress : bool, optional
+            Whether or not to output a simple summary of the current run that
+            updates with each iteration. Default is `True`.
+
+        print_func : function, optional
+            A function that prints out the current state of the sampler.
+            If not provided, the default :meth:`results.print_fn` is used.
+
+        """
+
+        # Initialize quantities/
+        if print_func is None:
+            print_func = print_fn
+
+        # Add remaining live points to samples.
+        ncall = self.ncall
+        it = self.it - 1
+        for i, results in enumerate(self.add_live_points()):
+            (worst, ustar, vstar, loglstar, logvol, logwt,
+             logz, logzvar, h, nc, worst_it, boundidx, bounditer,
+             eff, delta_logz) = results
+            if delta_logz > 1e6:
+                delta_logz = np.inf
+            if logz <= -1e6:
+                logz = -np.inf
+
+            # Print progress.
+            if print_progress:
+                print_func(results, it, ncall, add_live_it=i+1, dlogz=0.01)

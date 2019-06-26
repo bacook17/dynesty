@@ -298,6 +298,9 @@ contour :math:`\mathcal{L}(X)` to the integral depends both on its
 "amplitude" :math:`\mathcal{L}(X)` along with the (differential) prior volume
 :math:`dX` it occupies. This is maximized when both these quantities are
 jointly maximized, which occurs over points that represent the typical set.
+Because of the contribution from the "density" and "volume" terms
+are clearly seen here, this is sometimes also referred to as
+the **posterior mass**.
 Since the posterior importance weights
 
 .. math::
@@ -307,23 +310,8 @@ Since the posterior importance weights
 are also directly proportional to these quantities, Nested Sampling also
 naturally weights samples by their contribution to the typical set.
 
-We will return to this in :ref:`Visualizing Results`.
-
-Prior Transforms
-================
-
-The **prior transform** function is used to implicitly specify the Bayesian
-prior :math:`\pi(\boldsymbol{\Theta})` for Nested Sampling. It functions as
-a transformation from a space where variables are i.i.d. within the
-:math:`D`-dimensional unit cube (i.e. uniformly distributed from 0 to 1)
-to the parameter space of interest. For independent
-parameters, this would be the product of the `inverse cumulative distribution
-function (CDF) <https://en.wikipedia.org/wiki/Quantile_function>`_ (also
-known as the "percent point function" or "quantile function") associated with
-each parameter.
-
-Role of Priors in Nested Sampling
----------------------------------
+Priors in Nested Sampling
+=========================
 
 Unlike MCMC or similar methods, Nested Sampling starts by randomly sampling
 from the entire parameter space specified by the prior. This is not possible
@@ -343,7 +331,9 @@ the overall expected runtime. Since, in general, the posterior
 :math:`P(\boldsymbol{\Theta})` is (much) more localized that the prior
 :math:`\pi(\boldsymbol{\Theta})`, the "information" we gain from updating
 from the prior to the posterior can be characterized by the
-`KL divergence <https://en.wikipedia.org/wiki/Kullback-Leibler_divergence>`_:
+**Kullback-Leibler (KL) divergence** (see 
+`here <https://en.wikipedia.org/wiki/Kullback-Leibler_divergence>`_ 
+for more information):
 
 .. math::
 
@@ -362,58 +352,3 @@ In other words, increasing the size of the prior *directly* impacts the amount
 of time needed to integrate over the posterior. This highlights one of the
 main drawbacks of nested sampling: **using less "informative" priors will
 increase the expected number of nested sampling iterations**.
-
-Example: Uniform Priors
------------------------
-
-Suppose we want our prior to be Uniform from [-10, 10) for all variables:
-
-.. math::
-
-   p(x) \propto \left\{
-                \begin{array}{ll}
-                  1 \quad -10 \le x < 10\\
-                  0 \quad {\rm otherwise}
-                \end{array}
-              \right.
-
-The prior transform for this distribution would be::
-
-    def prior_transform(u):
-        """Transforms the uniform random variable `u ~ Unif[0., 1.)`
-        to the parameter of interest `x ~ Unif[-10., 10.)`."""
-
-        x = 2. * u - 1.  # scale and shift to [-1., 1.)
-        x *= 10.  # scale to [-10., 10.)
-
-        return x
-
-Example: Non-uniform priors
----------------------------
-
-Suppose we instead want our prior to be standard Normal. Using the
-inverse CDF for the normal distribution `scipy.special.ndtri`, we can transform
-our i.i.d. Uniform samples to a set of Normal samples via::
-
-    from scipy.special import ndtri
-
-    prior_transform = ndtri
-
-If we're instead interested in a Multivariate Normal prior with mean vector
-:math:`\boldsymbol{\mu}` and covariance matrix :math:`\mathbf{C}`, we can
-simply transform the output as follows::
-
-    def prior_transform(u):
-        """Transforms the uniform random variable `u ~ Unif[0., 1.)`
-        to the parameter of interest `x ~ Normal(mu, C)`."""
-
-        z = ndtri(u)  # transform to `z ~ Normal(0., 1.)`
-        x = mu + Csqrt * z  # transform to `x ~ Normal(mu, C)`
-
-        return x
-
-where `mu` is the mean vector and `Csqrt` is the matrix square root of the
-covariance matrix :math:`\mathbf{C}^{1/2}`.
-
-For constructing prior transforms for more complex priors, the distributions in
-`scipy.stats` often are quite useful.

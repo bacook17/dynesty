@@ -22,15 +22,19 @@ import numpy as np
 import copy
 from scipy import optimize as opt
 from numpy import linalg
-from scipy import misc
+try:
+    from scipy.special import logsumexp
+except ImportError:
+    from scipy.misc import logsumexp
 import warnings
 
-from .nestedsamplers import *
-from .sampler import *
-from .bounding import *
-from .sampling import *
-from .results import *
-from .utils import *
+from .nestedsamplers import (UnitCubeSampler, SingleEllipsoidSampler,
+                             MultiEllipsoidSampler, RadFriendsSampler,
+                             SupFriendsSampler)
+from .sampling import (sample_unif, sample_rwalk, sample_rstagger,
+                       sample_slice, sample_rslice, sample_hslice)
+from .results import Results, print_fn
+from .utils import kld_error
 
 __all__ = ["DynamicSampler", "weight_function", "stopping_function",
            "_kld_error"]
@@ -42,8 +46,10 @@ _SAMPLERS = {'none': UnitCubeSampler,
              'cubes': SupFriendsSampler}
 _SAMPLING = {'unif': sample_unif,
              'rwalk': sample_rwalk,
+             'rstagger': sample_rstagger,
              'slice': sample_slice,
-             'rslice': sample_rslice}
+             'rslice': sample_rslice,
+             'hslice': sample_hslice}
 
 SQRTEPS = math.sqrt(float(np.finfo(np.float64).eps))
 
@@ -122,10 +128,10 @@ def weight_function(results, args=None, return_weights=False):
     logz_remain = results.logl[-1] + results.logvol[-1]  # remainder
     logz_tot = np.logaddexp(logz[-1], logz_remain)  # estimated upper bound
     lzones = np.ones_like(logz)
-    logzin = misc.logsumexp([lzones * logz_tot, logz], axis=0,
-                            b=[lzones, -lzones])  # ln(remaining evidence)
+    logzin = logsumexp([lzones * logz_tot, logz], axis=0,
+                       b=[lzones, -lzones])  # ln(remaining evidence)
     logzweight = logzin - np.log(results.samples_n)  # ln(evidence weight)
-    logzweight -= misc.logsumexp(logzweight)  # normalize
+    logzweight -= logsumexp(logzweight)  # normalize
     zweight = np.exp(logzweight)  # convert to linear scale
 
     # Derive posterior weights.
@@ -248,7 +254,7 @@ def stopping_function(results, args=None, rstate=None, M=None,
     error = args.get('error', 'sim_approx')
     if error not in {'jitter', 'simulate', 'sim_approx'}:
         raise ValueError("The chosen `'error'` option {0} is not valid."
-                         .format(noise))
+                         .format(error))
     if error == 'sim_approx':
         error = 'jitter'
         boost = 2.
@@ -304,16 +310,12 @@ class DynamicSampler(object):
     bound : {`'none'`, `'single'`, `'multi'`, `'balls'`, `'cubes'`}, optional
         Method used to approximately bound the prior using the current
         set of live points. Conditions the sampling methods used to
-        propose new live points. Choices are no bound (`'none'`), a single
-        bounding ellipsoid (`'single'`), multiple bounding ellipsoids
-        (`'multi'`), balls centered on each live point (`'balls'`), and
-        cubes centered on each live point (`'cubes'`). Default is `'multi'`.
+        propose new live points.
 
-    method : {`'unif'`, `'rwalk'`, `'slice'`}, optional
+    method : {`'unif'`, `'rwalk'`, `'rstagger'`,
+              `'slice'`, `'rslice'`, `'hslice'`}, optional
         Method used to sample uniformly within the likelihood constraint,
-        conditioned on the provided bounds. Choices are uniform
-        (`'unif'`), random walks (`'rwalk'`), and slices (`'slice'`).
-        Default is `'unif'`.
+        conditioned on the provided bounds.
 
     update_interval : int
         Only update the bounding distribution every `update_interval`-th
@@ -340,46 +342,6 @@ class DynamicSampler(object):
 
     kwargs : dict, optional
         A dictionary of additional parameters (described below).
-
-    Other Parameters
-    ----------------
-    enlarge : float, optional
-        Enlarge the volumes of the ellipsoids by this fraction. The preferred
-        method is to determine this organically using bootstrapping. If
-        `bootstrap > 0`, this defaults to `1.0`. If `bootstrap = 0`,
-        this instead defaults to `1.25`.
-
-    bootstrap : int, optional
-        Compute this many bootstrapped realizations of the bounding
-        objects. Use the maximum distance found to the set of points left
-        out during each iteration to enlarge the resulting volumes.
-        Default is `20` for uniform sampling (`'unif'`) and `0` for random
-        walks (`'rwalk'`) and slice sampling (`'slice'`).
-
-    vol_dec : float, optional
-        For the `'multi'` bounding option, the required fractional reduction
-        in volume after splitting an ellipsoid in order to to accept the split.
-        Default is `0.5`.
-
-    vol_check : float, optional
-        For the `'multi'` bounding option, the factor used when checking if
-        the volume of the original bounding ellipsoid is large enough to
-        warrant `> 2` splits via `ell.vol > vol_check * nlive * pointvol`.
-        Default is `2.0`.
-
-    walks : int, optional
-        For the `'rwalk'` sampling option, the minimum number of steps
-        (minimum 2) before proposing a new live point. Default is `25`.
-
-    facc : float, optional
-        The target acceptance fraction for the `'rwalk'` sampling option.
-        Default is `0.5`. Bounded to be between `[1. / walks, 1.]`.
-
-    slices : int, optional
-        For the `'slice'` sampling option, the number of times to "slice"
-        through **all dimensions** before proposing a new live point.
-        Default is `3`.
-
 
     """
 
@@ -603,24 +565,27 @@ class DynamicSampler(object):
         bounds are also returned."""
 
         # Add all saved samples (and ancillary quantities) to the results.
-        results = [('niter', self.it - 1),
-                   ('ncall', np.array(self.saved_nc)),
-                   ('eff', self.eff),
-                   ('samples', np.array(self.saved_v)),
-                   ('samples_id', np.array(self.saved_id)),
-                   ('samples_batch', np.array(self.saved_batch, dtype='int')),
-                   ('samples_it', np.array(self.saved_it)),
-                   ('samples_u', np.array(self.saved_u)),
-                   ('samples_n', np.array(self.saved_n)),
-                   ('logwt', np.array(self.saved_logwt)),
-                   ('logl', np.array(self.saved_logl)),
-                   ('logvol', np.array(self.saved_logvol)),
-                   ('logz', np.array(self.saved_logz)),
-                   ('logzerr', np.sqrt(np.array(self.saved_logzvar))),
-                   ('information', np.array(self.saved_h)),
-                   ('batch_nlive', np.array(self.saved_batch_nlive,
-                                            dtype='int')),
-                   ('batch_bounds', np.array(self.saved_batch_bounds))]
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            results = [('niter', self.it - 1),
+                       ('ncall', np.array(self.saved_nc)),
+                       ('eff', self.eff),
+                       ('samples', np.array(self.saved_v)),
+                       ('samples_id', np.array(self.saved_id)),
+                       ('samples_batch', np.array(self.saved_batch,
+                                                  dtype='int')),
+                       ('samples_it', np.array(self.saved_it)),
+                       ('samples_u', np.array(self.saved_u)),
+                       ('samples_n', np.array(self.saved_n)),
+                       ('logwt', np.array(self.saved_logwt)),
+                       ('logl', np.array(self.saved_logl)),
+                       ('logvol', np.array(self.saved_logvol)),
+                       ('logz', np.array(self.saved_logz)),
+                       ('logzerr', np.sqrt(np.array(self.saved_logzvar))),
+                       ('information', np.array(self.saved_h)),
+                       ('batch_nlive', np.array(self.saved_batch_nlive,
+                                                dtype='int')),
+                       ('batch_bounds', np.array(self.saved_batch_bounds))]
 
         # Add any saved bounds (and ancillary quantities) to the results.
         if self.sampler.save_bounds:
@@ -1041,11 +1006,7 @@ class DynamicSampler(object):
         base_u = np.array(self.base_u)
         base_v = np.array(self.base_v)
         base_logl = np.array(self.base_logl)
-        base_nc = np.array(self.base_nc)
-        base_boundidx = np.array(self.base_boundidx)
-        base_it = np.array(self.base_it)
         base_n = np.array(self.base_n)
-        base_bounditer = np.array(self.base_bounditer)
         base_scale = np.array(self.base_scale)
         nbase = len(base_n)
         nblive = self.nlive_init
@@ -1181,7 +1142,7 @@ class DynamicSampler(object):
         if self.sampler._beyond_unit_bound(loglmin):
             bound = self.sampler.update(vol / nlive_new)
             if save_bounds:
-                    self.sampler.bound.append(copy.deepcopy(bound))
+                self.sampler.bound.append(copy.deepcopy(bound))
             self.sampler.nbound += 1
             self.sampler.since_update = 0
 
@@ -1402,9 +1363,8 @@ class DynamicSampler(object):
         loglstar = -1.e300
         logzvar = 0.
         logvols_pad = np.concatenate(([0.], self.saved_logvol))
-        logdvols = misc.logsumexp(a=np.c_[logvols_pad[:-1], logvols_pad[1:]],
-                                  axis=1, b=np.c_[np.ones(ntot),
-                                                  -np.ones(ntot)])
+        logdvols = logsumexp(a=np.c_[logvols_pad[:-1], logvols_pad[1:]],
+                             axis=1, b=np.c_[np.ones(ntot), -np.ones(ntot)])
         logdvols += math.log(0.5)
         dlvs = logvols_pad[:-1] - logvols_pad[1:]
         for i in range(ntot):
@@ -1420,7 +1380,7 @@ class DynamicSampler(object):
             dh = h_new - h
             h = h_new
             logz = logz_new
-            logzvar += dh * dlv
+            logzvar += 2. * dh * dlv
             loglstar = loglstar_new
             self.saved_logwt.append(logwt)
             self.saved_logz.append(logz)

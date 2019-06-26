@@ -58,8 +58,9 @@ where :math:`\mathcal{Z}` is the again the Bayesian evidence.
 
 As such, the number of steps :math:`N` needed to integrate over the majority
 of the posterior starting from the prior subject to some 
-`\Delta \ln \hat{\mathcal{Z}}` (see :ref:`Stopping Criteria`) must scale with
-:math:`H`. We also know that :math:`N` should scale inversely with the typical
+:math:`\Delta \ln \hat{\mathcal{Z}}` (see :ref:`Stopping Criteria`)
+must scale with :math:`H`. We also know that :math:`N` 
+should scale inversely with the typical
 :math:`\Delta \ln X`. This gives us that the expected number of steps 
 :math:`\mathbb{E}[N]` goes as
 
@@ -83,7 +84,7 @@ rough uncertainty in :math:`\ln \mathcal{Z}` is then:
 .. math::
 
     \sigma[\ln \hat{\mathcal{Z}}] \sim \sigma[\ln \hat{X}] \sim 
-    \frac{\sigma[\ln N]}{\Delta \ln X} = \sqrt{H \Delta \ln X}
+    \sigma[\ln N] \, \Delta \ln X = \sqrt{H \Delta \ln X}
     = \sqrt{\frac{H}{K}}
 
 This approximation can be extended to Dynamic Nested Sampling runs by
@@ -92,10 +93,10 @@ exploiting the fact that
 .. math::
 
     \mathbb{V}[\ln \hat{\mathcal{Z}}] = 
-    \mathbb{V}[\sum_{i=1}^{N} \ln \hat{\mathcal{Z}}_i -
-    \ln \hat{\mathcal{Z}}_{i-1}] \equiv
-    \mathbb{V}[\sum_{i=1}^{N} \Delta \ln \hat{\mathcal{Z}}_i] \approx
-    \sum_{i=1}^{N} \mathbb{V}[\Delta \ln \hat{\mathcal{Z}}_i]
+    \mathbb{V} \left[ \sum_{i=1}^{N} \left( \ln \hat{\mathcal{Z}}_i -
+    \ln \hat{\mathcal{Z}}_{i-1} \right) \right] \equiv
+    \mathbb{V} \left[ \sum_{i=1}^{N} \Delta \ln \hat{\mathcal{Z}}_i \right] 
+    \approx \sum_{i=1}^{N} \mathbb{V}[\Delta \ln \hat{\mathcal{Z}}_i]
 
 where we take :math:`\ln \hat{\mathcal{Z}}_0 = 0`. Approximating 
 :math:`\mathbb{V}[\Delta \ln \hat{\mathcal{Z}_i}]` as
@@ -123,66 +124,46 @@ These are the errors that are returned by default in the output `~sys.stderr`
 statements and output `~dynesty.results.Results` instances and used in
 plotting functions.
 
-As an example, here's a comparison among three different runs to showcase
+As an example, here's a comparison among two different runs to showcase
 how the approximate errors take into account varying numbers of live points
 (and the associated changes in prior volume) throughout a given Nested Sampling
 run::
 
     # static nested sampling
     sampler = dynesty.NestedSampler(loglikelihood, prior_transform, ndim,
-                                    bound='single', sample='unif', nlive=1000)
+                                    bound='single', nlive=1000)
     sampler.run_nested()
     res = sampler.results
+    sys.stderr.write('\n')
 
     sampler.reset()
     sampler.run_nested(dlogz=0.01)
     res2 = sampler.results
+    sys.stderr.write('\n')
 
     # dynamic nested sampling
     dsampler = dynesty.DynamicNestedSampler(loglikelihood, prior_transform,
-                                            ndim,  bound='single',
-                                            sample='unif')
-    dsampler.run_nested(nlive_init=100, nlive_batch=100,
-                        maxiter=res2.niter+res2.nlive, use_stop=False)
+                                            ndim, bound='single')
+    dsampler.run_nested(maxiter=res2.niter+res2.nlive, use_stop=False)
     dres = dsampler.results
 
 .. rst-class:: sphx-glr-script-out
 
 Out::
 
-    iter: 6718+1000 | bound: 9 | nc: 1 | ncall: 39582 | eff(%): 19.499 | 
-    logz: -8.832 +/-  0.132 | dlogz:  0.006 <  5.005    
+    iter: 8973 | +1000 | bound: 8 | nc: 1 | ncall: 47632 | eff(%): 20.938 | 
+    loglstar:   -inf < -0.300 <    inf | logz: -9.169 +/-  0.097 | 
+    dlogz:  0.001 >  1.009
+    iter: 13175 | +1000 | bound: 14 | nc: 1 | ncall: 54140 | eff(%): 26.182 | 
+    loglstar:   -inf < -0.294 <    inf | logz: -8.852 +/-  0.084 | 
+    dlogz:  0.000 >  0.010
+    iter: 14175 | batch: 7 | bound: 35 | nc: 1 | ncall: 39494 | 
+    eff(%): 35.892 | loglstar: -5.792 < -0.329 < -0.645 | 
+    logz: -8.930 +/-  0.116 | stop:    nan
 
-    iter: 13502+1000 | bound: 24 | nc: 1 | ncall: 49568 | eff(%): 29.257 | 
-    logz: -9.179 +/-  0.086 | dlogz:  0.000 <  0.010    
-
-    iter: 14529 | batch: 31 | bound: 375 | nc: 1 | ncall: 41884 | 
-    eff(%): 34.689 | loglstar: -3.006 < -0.518 < -1.095 | 
-    logz: -9.135 +/-  0.130 | stop:    nan      
-
-.. code-block:: python
-
-    from dynesty import plotting as dyplot
-
-    # analytic evidence solution
-    lnz_truth = ndim * -np.log(2 * 10.)
-
-    # plotting results
-    fig, axes = dyplot.runplot(res, color='orange', mark_final_live=False)
-    fig, axes = dyplot.runplot(res2, color='red', mark_final_live=False,
-                               fig=(fig, axes))
-    fig, axes = dyplot.runplot(dres, color='blue', fig=(fig, axes),
-                               lnz_truth=lnz_truth, truth_color='black')
-    fig.tight_layout()
-
-.. image:: ../images/errors_001.png
-    :align: center
-
-The increase in error for the initial run reflects the increasing uncertainty
-in :math:`\ln X_i` at a given iteration after terminating, which contribute
-significantly to the error budget since we terminated relatively early. The
-differences among the latter two results illustrate how the location where
-samples are allocated can significantly affect the error budget.
+The differences among the results illustrate how the location where
+samples are allocated can significantly affect the error budget, as discussed
+in :ref:`Dynamic Nested Sampling`.
 
 Statistical Uncertainties
 =========================
@@ -195,8 +176,9 @@ and iso-likelihood contour :math:`\mathcal{L}_i`.
 Order Statistics
 ----------------
 
-Nested Sampling works thanks to the magic of **order statistics**. At the start
-of a Nested Sampling run, we sample :math:`K` points from the prior 
+Nested Sampling works thanks to the "magic" of **order statistics**.
+At the start of a Nested Sampling run, we sample :math:`K` 
+points from the prior 
 :math:`\pi(\boldsymbol{\Theta})` with likelihoods 
 :math:`\lbrace \mathcal{L}_1, \dots, \mathcal{L}_{K} \rbrace` and associated 
 prior volumes :math:`\lbrace X_1, \dots, X_K \rbrace`. We then want to pick the
@@ -208,7 +190,7 @@ likelihoods and prior volumes are inversely ordered such that
 :math:`\mathcal{L}_{(i)} \leftrightarrow X_{(K-i+1)}`.
 
 What is this prior volume? Since all the points were drawn from the prior,
-the `**probability integral transform (PIT)** 
+the `probability integral transform (PIT)
 <https://en.wikipedia.org/wiki/Probability_integral_transform>`_ tells us that
 the corresponding prior volumes are uniformly distributed **random variables**
 such that
@@ -291,7 +273,7 @@ sampling "down" the set of order statistics
 :math:`\lbrace X_{(1)}, \dots, X_{(K_j)} \rbrace` described above. If at
 iteration :math:`i > j` we have :math:`K_i < K_{i+1} < \dots < K_j` live
 points, then the prior volume is the :math:`X_{(K_i)}`-th order statistic.
-Relative to :math:`X_j`, have an expectation value of:
+Relative to :math:`X_j`, these have an expectation value of:
 
 .. math::
 
@@ -302,8 +284,8 @@ This leads to the prior volume changing in discrete "chunks" of
 :math:`X_j/(K_j+1)`. In the :ref:`Static Nested Sampling` case, this only
 occurs at the end when adding the final set of live points. In the 
 :ref:`Dynamic Nested Sampling` case, however, the changes in prior volume from
-iteration to iteration can swap back and forth between exponential and
-uniform shrinkage.
+iteration to iteration can swap back and forth between **exponential**
+and **uniform** shrinkage.
 
 We can simulate the joint distribution of these prior volumes by identifying
 continguous sequences of strictly decreasing live points and then simulating
@@ -459,8 +441,8 @@ usage is straightforward::
     res_list = dyfunc.unravel_run(res)  # unravel run into strands
     res_merge = dyfunc.merge_runs(res_list)  # merge strands
 
-**Note that these functions are mostly included for illustrative purposes
-and are not intended for heavy use.**
+**Note that these functions are mostly included for completeness
+and are not intended for heavy use in most practical applications.**
 
 Bootstrapping Runs
 ------------------
@@ -600,6 +582,8 @@ shown in :ref:`Jittering Runs` and :ref:`Bootstrapping Runs`.
 .. image:: ../images/errors_008.png
 
 We see that the final errors are about 50% larger than our approximation.
+This is quite typical, and reflects uncertainties that we ignored when
+deriving our approximation above.
 
 Validation Against Repeated Runs
 ================================
@@ -682,12 +666,12 @@ from each set of runs:
 
 Out::
 
-    Approx.:     -8.920 +/-  0.251
-    Sim.:        -8.930 +/-  0.256
-    Resamp.:     -8.930 +/-  0.253
-    Rep. (mean): -8.977 +/-  0.226
-    Comb.:       -8.943 +/-  0.348
-    Rep. (sim.): -8.971 +/-  0.348
+    Approx.:     -8.670 +/-  0.207
+    Sim.:        -8.696 +/-  0.192
+    Resamp.:     -8.676 +/-  0.180
+    Rep. (mean): -8.912 +/-  0.211
+    Comb.:       -8.699 +/-  0.262
+    Rep. (sim.): -8.946 +/-  0.289
 
 We can also compare the first and second moments of the posterior:
 
@@ -739,11 +723,11 @@ We can also compare the first and second moments of the posterior:
 
 Out::
 
-    Sim.:        [-0.019 -0.018 -0.019] +/- [ 0.015  0.015  0.016]
-    Resamp.:     [-0.018 -0.017 -0.017] +/- [ 0.015  0.015  0.014]
-    Rep. (mean): [-0.    -0.001 -0.   ] +/- [ 0.015  0.015  0.015]
-    Comb.:       [-0.018 -0.017 -0.018] +/- [ 0.019  0.019  0.019]
-    Rep. (sim.): [-0.002 -0.002 -0.002] +/- [ 0.021  0.021  0.022]
+    Sim.:        [-0.022 -0.022 -0.021] +/- [0.016 0.016 0.016]
+    Resamp.:     [-0.023 -0.023 -0.022] +/- [0.016 0.017 0.017]
+    Rep. (mean): [0.002 0.002 0.002] +/- [0.016 0.016 0.016]
+    Comb.:       [-0.022 -0.022 -0.021] +/- [0.021 0.021 0.022]
+    Rep. (sim.): [0.003 0.003 0.002] +/- [0.023 0.023 0.023]
 
 .. code-block:: python
 
@@ -798,11 +782,11 @@ Out::
 
 Out::
 
-    Sim.:        [ 0.939  0.945  0.942] +/- [ 0.021  0.021  0.021]
-    Resamp.:     [ 0.937  0.943  0.939] +/- [ 0.021  0.02   0.02 ]
-    Rep. (mean): [ 1.001  1.001  1.   ] +/- [ 0.022  0.022  0.022]
-    Comb.:       [ 0.939  0.945  0.941] +/- [ 0.029  0.029  0.029]
-    Rep. (sim.): [ 1.001  1.001  1.001] +/- [ 0.031  0.03   0.031]
+    Sim.:        [1.041 1.038 1.046] +/- [0.026 0.026 0.026]
+    Resamp.:     [1.039 1.035 1.044] +/- [0.026 0.026 0.027]
+    Rep. (mean): [0.994 0.994 0.993] +/- [0.026 0.026 0.026]
+    Comb.:       [1.041 1.037 1.045] +/- [0.035 0.036 0.037]
+    Rep. (sim.): [0.993 0.993 0.992] +/- [0.035 0.034 0.035]
 
 Our simulated uncertainties seem to do an excellent job of capturing the
 intrinsic combined statistical and sampling uncertainties.
@@ -889,9 +873,9 @@ below::
 
 Out::
 
-    Mean:    0.424
-    Std:     0.017
-    Std(%):  3.983
+    Mean:    0.425
+    Std:     0.016
+    Std(%):  3.833
 
 .. image:: ../images/errors_010.png
 
@@ -927,8 +911,8 @@ estimation. The corresponding results are shown below for comparison::
 Out::
 
     Mean:    0.423
-    Std:     0.011
-    Std(%):  2.516
+    Std:     0.012
+    Std(%):  2.909
 
 .. image:: ../images/errors_011.png
 
