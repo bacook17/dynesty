@@ -12,7 +12,10 @@ from six.moves import range
 import sys
 import warnings
 import math
-import scipy.misc as misc
+try:
+    from scipy.special import logsumexp
+except ImportError:
+    from scipy.misc import logsumexp
 import numpy as np
 import copy
 
@@ -317,9 +320,9 @@ def jitter_run(res, rstate=None, approx=False):
     loglstar = -1.e300
     logzvar = 0.
     logvols_pad = np.concatenate(([0.], logvol))
-    logdvols = misc.logsumexp(a=np.c_[logvols_pad[:-1], logvols_pad[1:]],
-                              axis=1, b=np.c_[np.ones(nsamps),
-                                              -np.ones(nsamps)])
+    logdvols = logsumexp(a=np.c_[logvols_pad[:-1], logvols_pad[1:]],
+                         axis=1, b=np.c_[np.ones(nsamps),
+                                         -np.ones(nsamps)])
     logdvols += math.log(0.5)
     dlvs = -np.diff(np.append(0., res.logvol))
     saved_logwt, saved_logz, saved_logzvar, saved_h = [], [], [], []
@@ -502,9 +505,9 @@ def resample_run(res, rstate=None, return_idx=False):
     loglstar = -1.e300
     logzvar = 0.
     logvols_pad = np.concatenate(([0.], logvol))
-    logdvols = misc.logsumexp(a=np.c_[logvols_pad[:-1], logvols_pad[1:]],
-                              axis=1, b=np.c_[np.ones(nsamps),
-                                              -np.ones(nsamps)])
+    logdvols = logsumexp(a=np.c_[logvols_pad[:-1], logvols_pad[1:]],
+                         axis=1, b=np.c_[np.ones(nsamps),
+                                         -np.ones(nsamps)])
     logdvols += math.log(0.5)
     dlvs = logvols_pad[:-1] - logvols_pad[1:]
     saved_logwt, saved_logz, saved_logzvar, saved_h = [], [], [], []
@@ -641,9 +644,9 @@ def reweight_run(res, logp_new, logp_old=None):
     loglstar = -1.e300
     logzvar = 0.
     logvols_pad = np.concatenate(([0.], logvol))
-    logdvols = misc.logsumexp(a=np.c_[logvols_pad[:-1], logvols_pad[1:]],
-                              axis=1, b=np.c_[np.ones(nsamps),
-                                              -np.ones(nsamps)])
+    logdvols = logsumexp(a=np.c_[logvols_pad[:-1], logvols_pad[1:]],
+                         axis=1, b=np.c_[np.ones(nsamps),
+                                         -np.ones(nsamps)])
     logdvols += math.log(0.5)
     dlvs = -np.diff(np.append(0., logvol))
     saved_logwt, saved_logz, saved_logzvar, saved_h = [], [], [], []
@@ -754,9 +757,9 @@ def unravel_run(res, save_proposals=True, print_progress=True):
         loglstar = -1.e300
         logzvar = 0.
         logvols_pad = np.concatenate(([0.], logvol))
-        logdvols = misc.logsumexp(a=np.c_[logvols_pad[:-1], logvols_pad[1:]],
-                                  axis=1, b=np.c_[np.ones(nsamps),
-                                                  -np.ones(nsamps)])
+        logdvols = logsumexp(a=np.c_[logvols_pad[:-1], logvols_pad[1:]],
+                             axis=1, b=np.c_[np.ones(nsamps),
+                                             -np.ones(nsamps)])
         logdvols += math.log(0.5)
         dlvs = logvols_pad[:-1] - logvols_pad[1:]
         saved_logwt, saved_logz, saved_logzvar, saved_h = [], [], [], []
@@ -1339,9 +1342,9 @@ def _merge_two(res1, res2, compute_aux=False):
         loglstar = -1.e300
         logzvar = 0.
         logvols_pad = np.concatenate(([0.], combined_logvol))
-        logdvols = misc.logsumexp(a=np.c_[logvols_pad[:-1], logvols_pad[1:]],
-                                  axis=1, b=np.c_[np.ones(ntot),
-                                                  -np.ones(ntot)])
+        logdvols = logsumexp(a=np.c_[logvols_pad[:-1], logvols_pad[1:]],
+                             axis=1, b=np.c_[np.ones(ntot),
+                                             -np.ones(ntot)])
         logdvols += math.log(0.5)
         dlvs = logvols_pad[:-1] - logvols_pad[1:]
         for i in range(ntot):
